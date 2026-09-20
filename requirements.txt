@@ -1,0 +1,2 @@
+# This project uses only Python standard-library modules.
+# tkinter is included with the standard Windows Python installation.
