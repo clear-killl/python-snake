@@ -34,5 +34,3 @@ python main.py
 ## Файлы
 
 - `main.py` — исходный код аркады.
-- `requirements.txt` — информация о зависимостях.
-- `.gitignore` — исключения Git для Python-кэша.
