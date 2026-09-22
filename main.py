@@ -138,10 +138,9 @@ class SnakeGame:
             highlightthickness=0,
         )
         self.canvas.pack(fill="both", expand=True, padx=14)
-        self.canvas.bind("<Configure>", lambda event: self.draw())
+        self.canvas.bind("<Configure>", lambda _: self.draw())
         self.info = tk.Label(parent, bg=BACKGROUND, fg=MUTED_COLOR, font=("Segoe UI", 10))
         self.info.pack(pady=(8, 10))
-        self.parent.bind_all("<KeyPress>", self.handle_key)
         self.reset()
 
     def reset(self):
@@ -313,8 +312,7 @@ class MinesweeperGame:
         self.info.pack(pady=(0, 6))
         self.board = tk.Frame(parent, bg=BACKGROUND)
         self.board.pack(fill="both", expand=True)
-        self.board.bind("<Configure>", lambda event: self.update_cell_font())
-        self.parent.bind_all("<KeyPress>", self.handle_key)
+        self.board.bind("<Configure>", lambda _: self.update_cell_font())
         self.reset()
 
     def reset(self):
@@ -354,8 +352,8 @@ class MinesweeperGame:
                     font=("Segoe UI Emoji", 10, "bold"),
                 )
                 cell.grid(row=y, column=x, sticky="nsew", padx=1, pady=1)
-                cell.bind("<Button-1>", lambda event, cx=x, cy=y: self.reveal(cx, cy))
-                cell.bind("<Button-3>", lambda event, cx=x, cy=y: self.toggle_flag(cx, cy))
+                cell.bind("<Button-1>", lambda _, cx=x, cy=y: self.reveal(cx, cy))
+                cell.bind("<Button-3>", lambda _, cx=x, cy=y: self.toggle_flag(cx, cy))
                 row.append(cell)
             self.buttons.append(row)
         self.info.config(
@@ -476,9 +474,6 @@ class MatchThreeGame:
         self.info.pack(pady=(0, 8))
         self.board = tk.Frame(parent, bg=BACKGROUND)
         self.board.pack(fill="both", expand=True)
-        self.parent.bind_all("<KeyPress>", self.handle_key)
-        self.parent.bind_all("<B1-Motion>", self.drag_motion_event)
-        self.parent.bind_all("<ButtonRelease-1>", self.end_drag)
         self.reset()
 
     def reset(self):
@@ -537,7 +532,7 @@ class MatchThreeGame:
                     cursor="hand2",
                 )
                 cell.grid(row=y, column=x, sticky="nsew", padx=2, pady=2)
-                cell.bind("<Button-1>", lambda event, cx=x, cy=y: self.start_drag(cx, cy))
+                cell.bind("<Button-1>", lambda _, cx=x, cy=y: self.start_drag(cx, cy))
                 row_buttons.append(cell)
             self.buttons.append(row_buttons)
         self.info.config(text=f"Счет: {self.score}/{MATCH_WIN_SCORE} | Зажми ЛКМ и проведи на соседнюю клетку | R, К или Р: заново")
@@ -581,7 +576,7 @@ class MatchThreeGame:
                 self.drag_target = None
             self.update_selection_visual()
 
-    def end_drag(self, event):
+    def end_drag(self, _):
         if self.dragging and self.drag_target is not None and not self.animating:
             target_x, target_y = self.drag_target
             self.swap_selected(target_x, target_y)
@@ -682,7 +677,7 @@ class TwentyFortyEightGame:
         controls = tk.Frame(parent, bg=BACKGROUND)
         controls.pack(pady=(0, 8))
         self.size_name = tk.StringVar(value="Классическое 4 x 4")
-        size_menu = tk.OptionMenu(controls, self.size_name, *self.SIZES, command=lambda value: self.reset())
+        size_menu = tk.OptionMenu(controls, self.size_name, *self.SIZES, command=lambda _: self.reset())
         size_menu.config(
             bg=BLUE,
             fg=TEXT_COLOR,
@@ -696,8 +691,7 @@ class TwentyFortyEightGame:
         self.info.pack(pady=(0, 8))
         self.board = tk.Frame(parent, bg=BACKGROUND)
         self.board.pack(fill="both", expand=True)
-        self.board.bind("<Configure>", lambda event: self.update_font())
-        self.parent.bind_all("<KeyPress>", self.handle_key)
+        self.board.bind("<Configure>", lambda _: self.update_font())
         self.reset()
 
     def reset(self):
@@ -841,6 +835,158 @@ class TwentyFortyEightGame:
             self.victory.destroy()
 
 
+class PacmanGame:
+    MAP = (
+        "#################",
+        "#........#......#",
+        "#.###.##.#.##.#.#",
+        "#.#.....#....#..#",
+        "#.###.#####.###.#",
+        "#.....#...#.....#",
+        "#####.#.#.#.#####",
+        "#.......#.......#",
+        "#.#####.#.#####.#",
+        "#.#...........#.#",
+        "#.###.#####.###.#",
+        "#.....#...#.....#",
+        "#.#####.#.#####.#",
+        "#...............#",
+        "#################",
+    )
+    TICK_MS = 150
+    GHOST_COLORS = ("#ea4335", "#4285f4", "#fbbc04")
+
+    def __init__(self, parent):
+        self.parent = parent
+        self.info = tk.Label(parent, bg=BACKGROUND, fg=MUTED_COLOR, font=("Segoe UI", 11, "bold"))
+        self.info.pack(pady=(0, 8))
+        self.canvas = tk.Canvas(parent, bg=BACKGROUND, highlightthickness=0)
+        self.canvas.pack(fill="both", expand=True, padx=14)
+        self.canvas.bind("<Configure>", lambda _: self.draw())
+        self.reset()
+
+    def reset(self):
+        if hasattr(self, "tick_job"):
+            self.parent.after_cancel(self.tick_job)
+        if hasattr(self, "victory"):
+            self.victory.destroy()
+        self.rows = len(self.MAP)
+        self.columns = len(self.MAP[0])
+        self.walls = {
+            (x, y)
+            for y, row in enumerate(self.MAP)
+            for x, value in enumerate(row)
+            if value == "#"
+        }
+        self.pellets = {
+            (x, y)
+            for y, row in enumerate(self.MAP)
+            for x, value in enumerate(row)
+            if value == "."
+        }
+        self.player = (1, 1)
+        self.direction = (0, 0)
+        self.next_direction = self.direction
+        self.ghosts = [(15, 1), (8, 7), (1, 13)]
+        self.score = 0
+        self.finished = False
+        self.won = False
+        self.info.config(text=f"Счет: {self.score} | Точек: {len(self.pellets)} | Стрелки/WASD | R, К или Р: заново")
+        self.draw()
+        self.schedule_tick()
+
+    def handle_key(self, event):
+        if is_restart_key(event):
+            self.reset()
+            return
+        directions = {
+            "up": (0, -1), "w": (0, -1), "ц": (0, -1),
+            "down": (0, 1), "s": (0, 1), "ы": (0, 1),
+            "left": (-1, 0), "a": (-1, 0), "ф": (-1, 0),
+            "right": (1, 0), "d": (1, 0), "в": (1, 0),
+        }
+        direction = directions.get(event.keysym.lower())
+        if direction:
+            self.next_direction = direction
+
+    def schedule_tick(self):
+        self.tick_job = self.parent.after(self.TICK_MS, self.tick)
+
+    def destroy(self):
+        if hasattr(self, "tick_job"):
+            self.parent.after_cancel(self.tick_job)
+        if hasattr(self, "victory"):
+            self.victory.destroy()
+
+    def can_move(self, position, direction):
+        x, y = position
+        next_position = (x + direction[0], y + direction[1])
+        return next_position not in self.walls
+
+    def tick(self):
+        if self.finished:
+            return
+        if self.can_move(self.player, self.next_direction):
+            self.direction = self.next_direction
+        if self.can_move(self.player, self.direction):
+            self.player = (self.player[0] + self.direction[0], self.player[1] + self.direction[1])
+        if self.player in self.pellets:
+            self.pellets.remove(self.player)
+            self.score += 10
+        moved_ghosts = []
+        for ghost in self.ghosts:
+            options = [
+                direction
+                for direction in ((0, -1), (0, 1), (-1, 0), (1, 0))
+                if self.can_move(ghost, direction)
+            ]
+            direction = random.choice(options)
+            moved_ghosts.append((ghost[0] + direction[0], ghost[1] + direction[1]))
+        self.ghosts = moved_ghosts
+        if self.player in self.ghosts:
+            self.finished = True
+            self.info.config(text=f"Пойман! Счет: {self.score} | R, К или Р: заново")
+        elif not self.pellets:
+            self.finished = True
+            self.won = True
+            self.info.config(text=f"ПОБЕДА! Счет: {self.score} | R, К или Р: заново")
+            self.victory = VictoryAnimation(self.parent)
+        else:
+            self.info.config(text=f"Счет: {self.score} | Точек: {len(self.pellets)} | Стрелки/WASD | R, К или Р: заново")
+        self.draw()
+        if not self.finished:
+            self.schedule_tick()
+
+    def draw(self):
+        self.canvas.delete("all")
+        canvas_width = max(self.canvas.winfo_width(), 510)
+        canvas_height = max(self.canvas.winfo_height(), 450)
+        cell_size = min(canvas_width / self.columns, canvas_height / self.rows)
+        board_width = cell_size * self.columns
+        board_height = cell_size * self.rows
+        offset_x = (canvas_width - board_width) / 2
+        offset_y = (canvas_height - board_height) / 2
+        self.canvas.create_rectangle(offset_x, offset_y, offset_x + board_width, offset_y + board_height, fill="#101820", outline="")
+        for x, y in self.walls:
+            self.canvas.create_rectangle(offset_x + x * cell_size, offset_y + y * cell_size, offset_x + (x + 1) * cell_size, offset_y + (y + 1) * cell_size, fill="#4285f4", outline=BACKGROUND)
+        for x, y in self.pellets:
+            radius = max(2, cell_size * 0.09)
+            center_x = offset_x + (x + 0.5) * cell_size
+            center_y = offset_y + (y + 0.5) * cell_size
+            self.canvas.create_oval(center_x - radius, center_y - radius, center_x + radius, center_y + radius, fill="#ffffff", outline="")
+        player_x, player_y = self.player
+        start = {(1, 0): 25, (-1, 0): 205, (0, -1): 115, (0, 1): 295}.get(self.direction, 25)
+        self.canvas.create_arc(offset_x + player_x * cell_size + 2, offset_y + player_y * cell_size + 2, offset_x + (player_x + 1) * cell_size - 2, offset_y + (player_y + 1) * cell_size - 2, start=start, extent=300, fill="#fbbc04", outline="")
+        for index, (ghost_x, ghost_y) in enumerate(self.ghosts):
+            color = self.GHOST_COLORS[index]
+            self.canvas.create_oval(offset_x + ghost_x * cell_size + 3, offset_y + ghost_y * cell_size + 3, offset_x + (ghost_x + 1) * cell_size - 3, offset_y + (ghost_y + 1) * cell_size - 3, fill=color, outline="")
+            eye_size = max(2, cell_size * 0.09)
+            for eye_offset in (0.35, 0.65):
+                eye_x = offset_x + (ghost_x + eye_offset) * cell_size
+                eye_y = offset_y + (ghost_y + 0.43) * cell_size
+                self.canvas.create_oval(eye_x - eye_size, eye_y - eye_size, eye_x + eye_size, eye_y + eye_size, fill="#ffffff", outline="")
+
+
 class GameApp:
     def __init__(self, root):
         self.root = root
@@ -852,8 +998,11 @@ class GameApp:
         window_height = min(SCREEN_HEIGHT, screen_height)
         self.root.geometry(f"{window_width}x{window_height}")
         self.root.resizable(True, True)
-        self.root.bind("<F11>", lambda event: self.root.attributes("-fullscreen", not self.root.attributes("-fullscreen")))
-        self.root.bind("<Escape>", lambda event: self.root.attributes("-fullscreen", False))
+        self.root.bind("<F11>", lambda _: self.root.attributes("-fullscreen", not self.root.attributes("-fullscreen")))
+        self.root.bind("<Escape>", lambda _: self.root.attributes("-fullscreen", False))
+        self.root.bind("<KeyPress>", self.handle_key)
+        self.root.bind("<B1-Motion>", self.handle_drag_motion)
+        self.root.bind("<ButtonRelease-1>", self.handle_drag_release)
         header = tk.Frame(root, bg=BACKGROUND)
         header.pack(fill="x", padx=14, pady=(14, 8))
         header.grid_columnconfigure(1, weight=1)
@@ -864,6 +1013,7 @@ class GameApp:
         make_button(navigation, "Сапёр", lambda: self.show("mines")).pack(side="left", padx=2)
         make_button(navigation, "Три в ряд", lambda: self.show("match")).pack(side="left", padx=2)
         make_button(navigation, "2048", lambda: self.show("2048")).pack(side="left", padx=2)
+        make_button(navigation, "Pac-Man", lambda: self.show("pacman")).pack(side="left", padx=2)
         self.theme_button = make_button(navigation, "Тёмная тема", self.toggle_theme)
         self.theme_button.pack(side="left", padx=2)
         self.header = header
@@ -873,6 +1023,18 @@ class GameApp:
         self.theme_name = "light"
         self.active_game = "snake"
         self.show("snake")
+
+    def handle_key(self, event):
+        if hasattr(self, "current") and hasattr(self.current, "handle_key"):
+            self.current.handle_key(event)
+
+    def handle_drag_motion(self, event):
+        if hasattr(self, "current") and hasattr(self.current, "drag_motion_event"):
+            self.current.drag_motion_event(event)
+
+    def handle_drag_release(self, event):
+        if hasattr(self, "current") and hasattr(self.current, "end_drag"):
+            self.current.end_drag(event)
 
     def toggle_theme(self):
         self.theme_name = "dark" if self.theme_name == "light" else "light"
@@ -905,6 +1067,8 @@ class GameApp:
             self.current = MinesweeperGame(self.content)
         elif game == "2048":
             self.current = TwentyFortyEightGame(self.content)
+        elif game == "pacman":
+            self.current = PacmanGame(self.content)
         else:
             self.current = MatchThreeGame(self.content)
         self.root.focus_force()
