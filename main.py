@@ -19,7 +19,7 @@ MINES_TEXT = "#202124"
 MINES_MINE = "#ea4335"
 SCREEN_WIDTH = 1920
 SCREEN_HEIGHT = 1080
-SNAKE_WIN_SCORE = 10
+SNAKE_WIN_SCORE = 25
 MATCH_WIN_SCORE = 700
 THEMES = {
     "light": {
@@ -128,8 +128,10 @@ class SnakeGame:
     GRID_HEIGHT = 20
     TICK_MS = 105
 
-    def __init__(self, parent):
+    def __init__(self, parent, app=None):
         self.parent = parent
+        self.app = app
+        self.auto_restart_job = None
         self.canvas = tk.Canvas(
             parent,
             width=self.CELL_SIZE * self.GRID_WIDTH,
@@ -146,6 +148,9 @@ class SnakeGame:
     def reset(self):
         if hasattr(self, "tick_job"):
             self.parent.after_cancel(self.tick_job)
+        if self.auto_restart_job is not None:
+            self.parent.after_cancel(self.auto_restart_job)
+            self.auto_restart_job = None
         if hasattr(self, "victory"):
             self.victory.destroy()
         center = (self.GRID_WIDTH // 2, self.GRID_HEIGHT // 2)
@@ -169,6 +174,13 @@ class SnakeGame:
             if (x, y) not in self.snake
         ]
         return random.choice(free)
+
+    def schedule_auto_restart(self):
+        if self.app is None or not self.app.auto_restart:
+            return
+        if self.auto_restart_job is not None:
+            self.parent.after_cancel(self.auto_restart_job)
+        self.auto_restart_job = self.parent.after(1400, self.reset)
 
     def handle_key(self, event):
         key = event.keysym.lower()
@@ -198,6 +210,9 @@ class SnakeGame:
     def destroy(self):
         if hasattr(self, "tick_job"):
             self.parent.after_cancel(self.tick_job)
+        if self.auto_restart_job is not None:
+            self.parent.after_cancel(self.auto_restart_job)
+            self.auto_restart_job = None
         if hasattr(self, "victory"):
             self.victory.destroy()
 
@@ -215,6 +230,7 @@ class SnakeGame:
             if hit_wall or new_head in body:
                 self.game_over = True
                 self.info.config(text="ИГРА ОКОНЧЕНА | R, К или Р: заново")
+                self.schedule_auto_restart()
             else:
                 self.snake.appendleft(new_head)
                 if eating:
@@ -225,12 +241,14 @@ class SnakeGame:
                         self.paused = True
                         self.info.config(text=f"ПОБЕДА! Ты набрал {SNAKE_WIN_SCORE} очков | R, К или Р: заново")
                         self.victory = VictoryAnimation(self.parent)
+                        self.schedule_auto_restart()
                 else:
                     self.snake.pop()
             if not self.game_over and not self.won:
                 self.info.config(text=f"Счет: {self.score}/{SNAKE_WIN_SCORE} | Стрелки/WASD | R, К или Р: заново")
             self.draw()
-        self.schedule_tick()
+        if not self.game_over and not self.won:
+            self.schedule_tick()
 
     def draw(self):
         self.canvas.delete("all")
@@ -292,17 +310,40 @@ class MinesweeperGame:
         "Среднее 16 x 16": (16, 16, 40),
         "Большое 30 x 16": (30, 16, 99),
     }
+    PALETTES = {
+        "light": {
+            "board": "#ffffff",
+            "closed": "#4285f4",
+            "hover": "#3367d6",
+            "open": "#e8f0fe",
+            "mine": "#ea4335",
+            "mine_text": "#202124",
+            "numbers": {1: "#1967d2", 2: "#188038", 3: "#d93025", 4: "#b06000"},
+        },
+        "dark": {
+            "board": "#262b33",
+            "closed": "#315d9c",
+            "hover": "#3c74bd",
+            "open": "#3c4043",
+            "mine": "#9e3535",
+            "mine_text": "#ffffff",
+            "numbers": {1: "#8ab4f8", 2: "#81c995", 3: "#f28b82", 4: "#fdd663"},
+        },
+    }
 
-    def __init__(self, parent):
+    def __init__(self, parent, app=None):
         self.parent = parent
+        self.app = app
+        self.auto_restart_job = None
+        self.colors = self.get_colors()
         controls = tk.Frame(parent, bg=BACKGROUND)
         controls.pack(pady=(0, 8))
         self.difficulty = tk.StringVar(value="Малое 9 x 9")
         menu = tk.OptionMenu(controls, self.difficulty, *self.DIFFICULTIES)
         menu.config(
-            bg=MINES_CLOSED,
+            bg=self.colors["closed"],
             fg=TEXT_COLOR,
-            activebackground=MINES_HOVER,
+            activebackground=self.colors["hover"],
             highlightthickness=0,
             font=("Segoe UI", 10),
         )
@@ -315,15 +356,24 @@ class MinesweeperGame:
         self.board.bind("<Configure>", lambda _: self.update_cell_font())
         self.reset()
 
+    def get_colors(self):
+        theme_name = self.app.theme_name if self.app is not None else "light"
+        return self.PALETTES[theme_name]
+
     def reset(self):
         if hasattr(self, "explosion_job"):
             self.parent.after_cancel(self.explosion_job)
+        if self.auto_restart_job is not None:
+            self.parent.after_cancel(self.auto_restart_job)
+            self.auto_restart_job = None
         if hasattr(self, "victory"):
             self.victory.destroy()
         if hasattr(self, "buttons"):
             for row in self.buttons:
                 for cell in row:
                     cell.destroy()
+        self.colors = self.get_colors()
+        self.board.configure(bg=self.colors["board"])
         self.width, self.height, self.mine_count = self.DIFFICULTIES[self.difficulty.get()]
         cells = [(x, y) for x in range(self.width) for y in range(self.height)]
         self.mines = set(random.sample(cells, self.mine_count))
@@ -344,9 +394,9 @@ class MinesweeperGame:
                     text="",
                     width=2,
                     height=1,
-                    bg=MINES_CLOSED,
+                    bg=self.colors["closed"],
                     fg=TEXT_COLOR,
-                    activebackground=MINES_HOVER,
+                    activebackground=self.colors["hover"],
                     relief="flat",
                     bd=0,
                     font=("Segoe UI Emoji", 10, "bold"),
@@ -372,6 +422,13 @@ class MinesweeperGame:
             for cell in row:
                 cell.config(font=cell_font)
 
+    def schedule_auto_restart(self):
+        if self.app is None or not self.app.auto_restart:
+            return
+        if self.auto_restart_job is not None:
+            self.parent.after_cancel(self.auto_restart_job)
+        self.auto_restart_job = self.parent.after(1400, self.reset)
+
     def handle_key(self, event):
         if is_restart_key(event):
             self.reset()
@@ -379,6 +436,9 @@ class MinesweeperGame:
     def destroy(self):
         if hasattr(self, "explosion_job"):
             self.parent.after_cancel(self.explosion_job)
+        if self.auto_restart_job is not None:
+            self.parent.after_cancel(self.auto_restart_job)
+            self.auto_restart_job = None
         if hasattr(self, "victory"):
             self.victory.destroy()
 
@@ -411,9 +471,12 @@ class MinesweeperGame:
             self.finished = True
             self.explosion_cells = list(self.mines)
             for mine_x, mine_y in self.explosion_cells:
-                self.buttons[mine_y][mine_x].config(text="💣", bg=YELLOW, fg=MINES_TEXT)
+                self.buttons[mine_y][mine_x].config(
+                    text="💣", bg=YELLOW, fg=self.colors["mine_text"]
+                )
             self.info.config(text="Бум! R, К или Р: новая игра")
             self.explosion_job = self.parent.after(350, self.animate_explosion, 0)
+            self.schedule_auto_restart()
             return
         queue = deque([(x, y)])
         while queue:
@@ -423,12 +486,11 @@ class MinesweeperGame:
             self.revealed.add(cell)
             cell_x, cell_y = cell
             count = self.mine_count_at(cell_x, cell_y)
-            colors = {1: "#1967d2", 2: "#188038", 3: "#d93025", 4: "#b06000"}
             self.buttons[cell_y][cell_x].config(
                 text=str(count) if count else " ",
                 relief="sunken",
-                bg=MINES_OPEN,
-                fg=colors.get(count, MINES_TEXT),
+                bg=self.colors["open"],
+                fg=self.colors["numbers"].get(count, TEXT_COLOR),
             )
             if count == 0:
                 queue.extend(
@@ -440,6 +502,7 @@ class MinesweeperGame:
             self.finished = True
             self.info.config(text="Победа! R, К или Р: новая игра")
             self.victory = VictoryAnimation(self.parent)
+            self.schedule_auto_restart()
         elif not self.finished:
             self.info.config(
                 text=f"Очки: {len(self.revealed)}/{self.width * self.height - self.mine_count} | Мины: {self.mine_count} | R, К или Р: заново"
@@ -447,9 +510,12 @@ class MinesweeperGame:
 
     def animate_explosion(self, index):
         if index >= len(self.explosion_cells):
+            self.schedule_auto_restart()
             return
         mine_x, mine_y = self.explosion_cells[index]
-        self.buttons[mine_y][mine_x].config(text="💥", bg=MINES_MINE, fg=TEXT_COLOR)
+        self.buttons[mine_y][mine_x].config(
+            text="💥", bg=self.colors["mine"], fg=self.colors["mine_text"]
+        )
         self.explosion_job = self.parent.after(120, self.animate_explosion, index + 1)
 
     def toggle_flag(self, x, y):
@@ -468,8 +534,10 @@ class MatchThreeGame:
     COLS = 8
     COLORS = ["#ff5c8a", "#ffd166", "#6cb6ff", "#7bf1a8", "#b58cff", "#ff9f68"]
 
-    def __init__(self, parent):
+    def __init__(self, parent, app=None):
         self.parent = parent
+        self.app = app
+        self.auto_restart_job = None
         self.info = tk.Label(parent, bg=BACKGROUND, fg=MUTED_COLOR, font=("Segoe UI", 10))
         self.info.pack(pady=(0, 8))
         self.board = tk.Frame(parent, bg=BACKGROUND)
@@ -479,6 +547,9 @@ class MatchThreeGame:
     def reset(self):
         if hasattr(self, "animation_job") and self.animation_job is not None:
             self.parent.after_cancel(self.animation_job)
+        if self.auto_restart_job is not None:
+            self.parent.after_cancel(self.auto_restart_job)
+            self.auto_restart_job = None
         if hasattr(self, "victory"):
             self.victory.destroy()
         self.score = 0
@@ -498,6 +569,13 @@ class MatchThreeGame:
             ]
         self.draw()
 
+    def schedule_auto_restart(self):
+        if self.app is None or not self.app.auto_restart:
+            return
+        if self.auto_restart_job is not None:
+            self.parent.after_cancel(self.auto_restart_job)
+        self.auto_restart_job = self.parent.after(1400, self.reset)
+
     def handle_key(self, event):
         if is_restart_key(event):
             self.reset()
@@ -505,6 +583,9 @@ class MatchThreeGame:
     def destroy(self):
         if self.animation_job is not None:
             self.parent.after_cancel(self.animation_job)
+        if self.auto_restart_job is not None:
+            self.parent.after_cancel(self.auto_restart_job)
+            self.auto_restart_job = None
         if hasattr(self, "victory"):
             self.victory.destroy()
 
@@ -623,6 +704,7 @@ class MatchThreeGame:
             self.won = True
             self.info.config(text=f"ПОБЕДА! {MATCH_WIN_SCORE} очков | R, К или Р: заново")
             self.victory = VictoryAnimation(self.parent)
+            self.schedule_auto_restart()
         self.draw()
 
     def resolve_matches(self):
@@ -657,23 +739,41 @@ class MatchThreeGame:
 
 class TwentyFortyEightGame:
     SIZES = {"Малое 3 x 3": 3, "Классическое 4 x 4": 4, "Большое 5 x 5": 5}
-    TILE_COLORS = {
-        0: ("#dfe3e8", "#5f6368"),
-        2: ("#f1f3f4", "#202124"),
-        4: ("#e8f0fe", "#202124"),
-        8: ("#fbbc04", "#ffffff"),
-        16: ("#f9ab00", "#ffffff"),
-        32: ("#ea4335", "#ffffff"),
-        64: ("#d93025", "#ffffff"),
-        128: ("#34a853", "#ffffff"),
-        256: ("#188038", "#ffffff"),
-        512: ("#4285f4", "#ffffff"),
-        1024: ("#1967d2", "#ffffff"),
-        2048: ("#7b1fa2", "#ffffff"),
+    TILE_PALETTES = {
+        "light": {
+            0: ("#dfe3e8", "#5f6368"),
+            2: ("#f1f3f4", "#202124"),
+            4: ("#e8f0fe", "#202124"),
+            8: ("#fbbc04", "#ffffff"),
+            16: ("#f9ab00", "#ffffff"),
+            32: ("#ea4335", "#ffffff"),
+            64: ("#d93025", "#ffffff"),
+            128: ("#34a853", "#ffffff"),
+            256: ("#188038", "#ffffff"),
+            512: ("#4285f4", "#ffffff"),
+            1024: ("#1967d2", "#ffffff"),
+            2048: ("#7b1fa2", "#ffffff"),
+        },
+        "dark": {
+            0: ("#3c4043", "#9aa0a6"),
+            2: ("#4e5d6c", "#ffffff"),
+            4: ("#586b7f", "#ffffff"),
+            8: ("#d9842f", "#ffffff"),
+            16: ("#bf641f", "#ffffff"),
+            32: ("#c54d4d", "#ffffff"),
+            64: ("#9e3535", "#ffffff"),
+            128: ("#3b8c66", "#ffffff"),
+            256: ("#26744f", "#ffffff"),
+            512: ("#3976b8", "#ffffff"),
+            1024: ("#315d9c", "#ffffff"),
+            2048: ("#7750a8", "#ffffff"),
+        },
     }
 
-    def __init__(self, parent):
+    def __init__(self, parent, app=None):
         self.parent = parent
+        self.app = app
+        self.auto_restart_job = None
         controls = tk.Frame(parent, bg=BACKGROUND)
         controls.pack(pady=(0, 8))
         self.size_name = tk.StringVar(value="Классическое 4 x 4")
@@ -695,6 +795,9 @@ class TwentyFortyEightGame:
         self.reset()
 
     def reset(self):
+        if self.auto_restart_job is not None:
+            self.parent.after_cancel(self.auto_restart_job)
+            self.auto_restart_job = None
         if hasattr(self, "victory"):
             self.victory.destroy()
         self.size = self.SIZES[self.size_name.get()]
@@ -716,6 +819,13 @@ class TwentyFortyEightGame:
         if empty:
             x, y = random.choice(empty)
             self.tiles[y][x] = 4 if random.random() < 0.1 else 2
+
+    def schedule_auto_restart(self):
+        if self.app is None or not self.app.auto_restart:
+            return
+        if self.auto_restart_job is not None:
+            self.parent.after_cancel(self.auto_restart_job)
+        self.auto_restart_job = self.parent.after(1400, self.reset)
 
     def handle_key(self, event):
         if is_restart_key(event):
@@ -773,8 +883,11 @@ class TwentyFortyEightGame:
         if any(2048 in row for row in self.tiles) and not self.won:
             self.won = True
             self.victory = VictoryAnimation(self.parent)
+            self.schedule_auto_restart()
         if not self.has_moves():
             self.finished = True
+            if not self.won:
+                self.schedule_auto_restart()
         self.draw()
 
     def has_moves(self):
@@ -792,6 +905,9 @@ class TwentyFortyEightGame:
         for child in self.board.winfo_children():
             child.destroy()
         self.buttons = []
+        theme_name = self.app.theme_name if self.app is not None else "light"
+        tile_colors = self.TILE_PALETTES[theme_name]
+        self.board.configure(bg="#262b33" if theme_name == "dark" else BACKGROUND)
         for column in range(self.size):
             self.board.grid_columnconfigure(column, weight=1, uniform="2048-column")
         for row in range(self.size):
@@ -800,7 +916,7 @@ class TwentyFortyEightGame:
             row_buttons = []
             for x in range(self.size):
                 value = self.tiles[y][x]
-                background, foreground = self.TILE_COLORS.get(value, ("#7b1fa2", "#ffffff"))
+                background, foreground = tile_colors.get(value, tile_colors[2048])
                 tile = tk.Label(
                     self.board,
                     text=str(value) if value else "",
@@ -831,6 +947,9 @@ class TwentyFortyEightGame:
                 tile.config(font=("Segoe UI", font_size, "bold"))
 
     def destroy(self):
+        if self.auto_restart_job is not None:
+            self.parent.after_cancel(self.auto_restart_job)
+            self.auto_restart_job = None
         if hasattr(self, "victory"):
             self.victory.destroy()
 
@@ -856,8 +975,10 @@ class PacmanGame:
     TICK_MS = 150
     GHOST_COLORS = ("#ea4335", "#4285f4", "#fbbc04")
 
-    def __init__(self, parent):
+    def __init__(self, parent, app=None):
         self.parent = parent
+        self.app = app
+        self.auto_restart_job = None
         self.info = tk.Label(parent, bg=BACKGROUND, fg=MUTED_COLOR, font=("Segoe UI", 11, "bold"))
         self.info.pack(pady=(0, 8))
         self.canvas = tk.Canvas(parent, bg=BACKGROUND, highlightthickness=0)
@@ -868,6 +989,9 @@ class PacmanGame:
     def reset(self):
         if hasattr(self, "tick_job"):
             self.parent.after_cancel(self.tick_job)
+        if self.auto_restart_job is not None:
+            self.parent.after_cancel(self.auto_restart_job)
+            self.auto_restart_job = None
         if hasattr(self, "victory"):
             self.victory.destroy()
         self.rows = len(self.MAP)
@@ -895,6 +1019,13 @@ class PacmanGame:
         self.draw()
         self.schedule_tick()
 
+    def schedule_auto_restart(self):
+        if self.app is None or not self.app.auto_restart:
+            return
+        if self.auto_restart_job is not None:
+            self.parent.after_cancel(self.auto_restart_job)
+        self.auto_restart_job = self.parent.after(1400, self.reset)
+
     def handle_key(self, event):
         if is_restart_key(event):
             self.reset()
@@ -915,6 +1046,9 @@ class PacmanGame:
     def destroy(self):
         if hasattr(self, "tick_job"):
             self.parent.after_cancel(self.tick_job)
+        if self.auto_restart_job is not None:
+            self.parent.after_cancel(self.auto_restart_job)
+            self.auto_restart_job = None
         if hasattr(self, "victory"):
             self.victory.destroy()
 
@@ -946,11 +1080,13 @@ class PacmanGame:
         if self.player in self.ghosts:
             self.finished = True
             self.info.config(text=f"Пойман! Счет: {self.score} | R, К или Р: заново")
+            self.schedule_auto_restart()
         elif not self.pellets:
             self.finished = True
             self.won = True
             self.info.config(text=f"ПОБЕДА! Счет: {self.score} | R, К или Р: заново")
             self.victory = VictoryAnimation(self.parent)
+            self.schedule_auto_restart()
         else:
             self.info.config(text=f"Счет: {self.score} | Точек: {len(self.pellets)} | Стрелки/WASD | R, К или Р: заново")
         self.draw()
@@ -990,6 +1126,7 @@ class PacmanGame:
 class GameApp:
     def __init__(self, root):
         self.root = root
+        self.auto_restart = False
         self.root.title("Color Arcade")
         self.root.configure(bg=BACKGROUND)
         screen_width = self.root.winfo_screenwidth()
@@ -1016,6 +1153,8 @@ class GameApp:
         make_button(navigation, "Pac-Man", lambda: self.show("pacman")).pack(side="left", padx=2)
         self.theme_button = make_button(navigation, "Тёмная тема", self.toggle_theme)
         self.theme_button.pack(side="left", padx=2)
+        self.auto_restart_button = make_button(navigation, "Автоперезапуск: выкл", self.toggle_auto_restart)
+        self.auto_restart_button.pack(side="left", padx=2)
         self.header = header
         self.navigation = navigation
         self.content = tk.Frame(root, bg=BACKGROUND)
@@ -1023,6 +1162,21 @@ class GameApp:
         self.theme_name = "light"
         self.active_game = "snake"
         self.show("snake")
+
+    def toggle_auto_restart(self):
+        self.auto_restart = not self.auto_restart
+        self.auto_restart_button.configure(
+            text="Автоперезапуск: вкл" if self.auto_restart else "Автоперезапуск: выкл"
+        )
+        if not self.auto_restart and getattr(self.current, "auto_restart_job", None) is not None:
+            self.root.after_cancel(self.current.auto_restart_job)
+            self.current.auto_restart_job = None
+        if hasattr(self, "current") and hasattr(self.current, "schedule_auto_restart"):
+            if self.auto_restart and any(
+                getattr(self.current, name, False)
+                for name in ("won", "finished", "game_over")
+            ):
+                self.current.schedule_auto_restart()
 
     def handle_key(self, event):
         if hasattr(self, "current") and hasattr(self.current, "handle_key"):
@@ -1062,15 +1216,15 @@ class GameApp:
         for child in self.content.winfo_children():
             child.destroy()
         if game == "snake":
-            self.current = SnakeGame(self.content)
+            self.current = SnakeGame(self.content, self)
         elif game == "mines":
-            self.current = MinesweeperGame(self.content)
+            self.current = MinesweeperGame(self.content, self)
         elif game == "2048":
-            self.current = TwentyFortyEightGame(self.content)
+            self.current = TwentyFortyEightGame(self.content, self)
         elif game == "pacman":
-            self.current = PacmanGame(self.content)
+            self.current = PacmanGame(self.content, self)
         else:
-            self.current = MatchThreeGame(self.content)
+            self.current = MatchThreeGame(self.content, self)
         self.root.focus_force()
 
 
